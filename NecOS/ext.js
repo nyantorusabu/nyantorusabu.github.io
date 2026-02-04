@@ -64,6 +64,7 @@
 					block('StopSprite', 'C', 'APP [ID] を停止', arg('ID', 'S')),
 					block('LsSprite', 'R', '最後に操作をしたAPPのID'),
 					block('Help', 'C', 'APP [ID] の説明を取得', arg('ID', 'S')),
+					block('GetMess', 'R', 'MessageのArrayを取得'),
 				),
 			);
 		}
@@ -145,6 +146,10 @@
 				return;
 			}
 			NDT.Spr.Eve.Message(args.ID, 'HELP');
+		}
+
+		GetMess(args) {
+			return JSON.stringify(NDT.List.Get('Message'));
 		}
 	}
 
