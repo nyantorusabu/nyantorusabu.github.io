@@ -228,7 +228,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
       const scaffolding = new Scaffolding.Scaffolding();
       scaffolding.width = 480;
       scaffolding.height = 360;
-      scaffolding.resizeMode = "preserve-ratio";
+      scaffolding.resizeMode = "dynamic-resize";
       scaffolding.editableLists = false;
       scaffolding.usePackagedRuntime = true;
       scaffolding.setup();
@@ -249,7 +249,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
       scaffolding.setAccentColor("#ff4c4c");
 
       try {
-        scaffolding.addCloudProvider(new Scaffolding.Cloud.WebSocketProvider(["wss://clouddata.turbowarp.org","wss://clouddata.turbowarp.xyz"], "p4-@index.sb3"));
+        scaffolding.addCloudProvider(new Scaffolding.Cloud.WebSocketProvider(["wss://clouddata.turbowarp.org","wss://clouddata.turbowarp.xyz"], "p4-@NecOS.sb3"));
       } catch (error) {
         console.error(error);
       }
