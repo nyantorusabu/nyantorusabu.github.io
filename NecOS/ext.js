@@ -65,12 +65,19 @@
 					block('LsSprite', 'R', '最後に操作をしたAPPのID'),
 					block('Help', 'C', 'APP [ID] の説明を取得', arg('ID', 'S')),
 					block('GetMess', 'R', 'MessageのArrayを取得'),
+					block(
+						'GetAppPos',
+						'R',
+						'[Pos] 番目のAPPのID',
+						arg('Pos', 'N', 1),
+					),
+					block('GetAppLength', 'R', '全APPの数'),
 				),
 			);
 		}
 
 		send(args) {
-			NDT.List.Get('Message').push(args.Log);
+			Send(args.Log);
 		}
 
 		runCMD(args) {
@@ -104,13 +111,11 @@
 			}
 
 			const cmd = List[0];
+			Send(`> ${List.join(' ')}`);
 			if (!NDT.Spr.NameList.includes(cmd)) {
-				NDT.List.Get('Message').push(
-					`APP"${cmd}"は見つかりませんでした。`,
-				);
+				Send(`APP"${cmd}"は見つかりませんでした。`);
 				return;
 			}
-			NDT.List.Get('Message').push(`> ${List.join(' ')}`);
 			List = List.slice(1);
 			NDT.List.SetArray('CMD', List);
 			NDT.Spr.Eve.Message(cmd, 'RUN');
@@ -121,16 +126,17 @@
 		}
 
 		async AddSprite(args) {
-			LsSpr = (await NDT.Spr.Add(args.URL)).getName();
+			LsSprID = (await NDT.Spr.Add(args.URL)).getName();
+			NDT.Spr.Eve.Message(LsSprID, 'RESET');
 		}
 
 		DelSprite(args) {
-			LsSpr = NDT.Spr.Get(args.ID).getName();
+			LsSprID = NDT.Spr.Get(args.ID).getName();
 			NDT.Spr.Delete(args.ID);
 		}
 
 		StopSprite(args) {
-			LsSpr = NDT.Spr.Get(args.ID).getName();
+			LsSprID = NDT.Spr.Get(args.ID).getName();
 			NDT.Spr.Eve.Stop(args.ID);
 		}
 
@@ -140,19 +146,30 @@
 
 		Help(args) {
 			if (!NDT.Spr.NameList.includes(args.ID)) {
-				NDT.List.Get('Message').push(
-					`${args.ID}が見つかりませんでした。`,
-				);
+				Send(`${args.ID}が見つかりませんでした。`);
 				return;
 			}
 			NDT.Spr.Eve.Message(args.ID, 'HELP');
 		}
 
-		GetMess(args) {
+		GetMess() {
 			return JSON.stringify(NDT.List.Get('Message'));
+		}
+
+		GetAppPos(args) {
+			const target = NDT.Spr.All.filter((s) => !s.isStage)[args.Pos - 1];
+			if (target) return target.getName();
+			return '';
+		}
+
+		GetAppLength() {
+			return NDT.Spr.All.filter((s) => !s.isStage).length;
 		}
 	}
 
+	function Send(Message) {
+		NDT.List.Get('Message').push(Message);
+	}
 	// NyankoExtensionCreater
 	// 短縮表現変換
 	function abbreviation(code, ...link) {
