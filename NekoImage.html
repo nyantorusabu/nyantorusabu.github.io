@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="ja">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>NekoImageConverter</title>
+		<style>
+			body {
+				font-family: system-ui, sans-serif;
+				max-width: 800px;
+				margin: 40px auto;
+				padding: 0 20px;
+			}
+			h1 {
+				text-align: center;
+			}
+			#preview {
+				max-width: 100%;
+				max-height: 400px;
+				margin: 20px auto;
+				display: block;
+				border: 1px solid #ccc;
+				object-fit: contain;
+			}
+			textarea {
+				width: 100%;
+				height: 180px;
+				font-family: monospace;
+				padding: 12px;
+				box-sizing: border-box;
+				resize: vertical;
+			}
+			.controls {
+				margin: 20px 0;
+				text-align: center;
+			}
+			button,
+			input[type='file'] {
+				padding: 10px 20px;
+				font-size: 1rem;
+				margin: 8px;
+			}
+			#status {
+				color: #555;
+				text-align: center;
+				min-height: 1.5em;
+			}
+			#copyBtn:disabled {
+				opacity: 0.6;
+				cursor: not-allowed;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>NekoImageConverter</h1>
+
+		<div style="text-align: center; margin-bottom: 20px">
+			<input type="file" id="fileInput" accept="image/*" />
+		</div>
+
+		<img id="preview" alt="プレビュー" />
+
+		<div class="controls">
+			<button id="convertBtn" disabled>NekoImageに変換</button>
+			<button id="copyBtn" disabled>結果をコピー</button>
+		</div>
+
+		<textarea
+			id="result"
+			placeholder="変換結果はここに表示されます..."
+			readonly
+		></textarea>
+
+		<div id="status"></div>
+
+		<script>
+			const VER = 1;
+
+			async function ImageToNekoImage(URL) {
+				const img = new Image();
+				img.crossOrigin = 'anonymous';
+
+				await new Promise((resolve, reject) => {
+					img.onload = resolve;
+					img.onerror = () =>
+						reject(
+							new Error(`画像の読み込みに失敗しました: ${URL}`),
+						);
+					img.src = URL;
+				});
+
+				const canvas = document.createElement('canvas');
+				canvas.width = img.width;
+				canvas.height = img.height;
+
+				const ctx = canvas.getContext('2d');
+				ctx.drawImage(img, 0, 0);
+
+				const imageData = ctx.getImageData(
+					0,
+					0,
+					canvas.width,
+					canvas.height,
+				);
+				const data = imageData.data;
+				const Pixels = [];
+
+				for (let i = 0; i < data.length; i += 4) {
+					const PxData =
+						data[i].toString(16).padStart(2, '0') +
+						data[i + 1].toString(16).padStart(2, '0') +
+						data[i + 2].toString(16).padStart(2, '0') +
+						data[i + 3].toString(16).padStart(2, '0');
+					Pixels.push(PxData);
+				}
+
+				const Link = [];
+				let Data = '';
+
+				if (Pixels.length === 0) {
+					return null;
+				}
+
+				let L = Pixels[0];
+				let LC = 1;
+				if (!Link.includes(L)) Link.push(L);
+
+				for (let i = 1; i < Pixels.length; i++) {
+					const now = Pixels[i];
+					if (now === L) {
+						LC++;
+					} else {
+						const Index = Link.indexOf(L);
+						Data += `${Index + 1}.${LC}.`;
+						L = now;
+						LC = 1;
+						if (!Link.includes(L)) Link.push(L);
+					}
+				}
+
+				const lastIndex = Link.indexOf(L);
+				Data += `${lastIndex + 1}.${LC}.`;
+
+				return `${VER}.${canvas.width}.${canvas.height},${Link.join('')},${Data}`;
+			}
+
+			const fileInput = document.getElementById('fileInput');
+			const preview = document.getElementById('preview');
+			const convertBtn = document.getElementById('convertBtn');
+			const copyBtn = document.getElementById('copyBtn');
+			const resultArea = document.getElementById('result');
+			const status = document.getElementById('status');
+
+			let currentBlobURL = null;
+
+			fileInput.addEventListener('change', () => {
+				const file = fileInput.files[0];
+				if (!file) {
+					convertBtn.disabled = true;
+					preview.src = '';
+					resultArea.value = '';
+					copyBtn.disabled = true;
+					return;
+				}
+
+				if (!file.type.startsWith('image/')) {
+					status.textContent = '画像ファイルを選択してください';
+					return;
+				}
+
+				status.textContent = '読み込み中...';
+				if (currentBlobURL) URL.revokeObjectURL(currentBlobURL);
+
+				currentBlobURL = URL.createObjectURL(file);
+				preview.src = currentBlobURL;
+				preview.onload = () => {
+					status.textContent = `画像サイズ: ${preview.naturalWidth} × ${preview.naturalHeight}`;
+					convertBtn.disabled = false;
+				};
+				preview.onerror = () => {
+					status.textContent = '画像の表示に失敗しました';
+				};
+			});
+
+			convertBtn.addEventListener('click', async () => {
+				if (!currentBlobURL) return;
+
+				convertBtn.disabled = true;
+				copyBtn.disabled = true;
+				resultArea.value = '';
+				status.textContent = '変換中...';
+
+				try {
+					const nekoStr = await ImageToNekoImage(currentBlobURL);
+					if (!nekoStr) {
+						throw new Error('変換結果が空です');
+					}
+
+					resultArea.value = nekoStr;
+					copyBtn.disabled = false;
+					status.textContent = `変換完了(データの長さ: ${nekoStr.length})`;
+				} catch (err) {
+					console.error(err);
+					status.textContent = 'エラー: ' + err.message;
+				} finally {
+					convertBtn.disabled = false;
+				}
+			});
+
+			copyBtn.addEventListener('click', async () => {
+				const text = resultArea.value.trim();
+				if (!text) return;
+
+				try {
+					await navigator.clipboard.writeText(text);
+					status.textContent = 'クリップボードにコピーしました';
+				} catch (err) {
+					console.error(err);
+					status.textContent =
+						'コピーに失敗しました。手動で選択してコピーしてください';
+				}
+			});
+		</script>
+	</body>
+</html>
