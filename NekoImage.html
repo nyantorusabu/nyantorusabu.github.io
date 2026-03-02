@@ -30,7 +30,8 @@
 				box-sizing: border-box;
 				resize: vertical;
 			}
-			.controls {
+			.controls,
+			.options {
 				margin: 20px 0;
 				text-align: center;
 			}
@@ -65,6 +66,13 @@
 			<button id="copyBtn" disabled>結果をコピー</button>
 		</div>
 
+		<div class="options">
+			<input id="resizeChk" type="checkbox" checked /><label
+				for="resizeChk"
+				>自動で480x360以下にリサイズする</label
+			>
+		</div>
+
 		<textarea
 			id="result"
 			placeholder="変換結果はここに表示されます..."
@@ -75,6 +83,49 @@
 
 		<script>
 			const VER = 1;
+
+			async function resizeImage(
+				url,
+				maxWidth = 480,
+				maxHeight = 360,
+				sharp = false,
+			) {
+				return new Promise((resolve, reject) => {
+					const img = new Image();
+					img.crossOrigin = 'anonymous';
+
+					img.onload = () => {
+						let width = img.naturalWidth;
+						let height = img.naturalHeight;
+
+						if (width > maxWidth || height > maxHeight) {
+							const scale = Math.min(
+								maxWidth / width,
+								maxHeight / height,
+							);
+							width = Math.round(width * scale);
+							height = Math.round(height * scale);
+						}
+
+						const canvas = document.createElement('canvas');
+						canvas.width = width;
+						canvas.height = height;
+
+						const ctx = canvas.getContext('2d');
+
+						ctx.imageSmoothingEnabled = !sharp;
+
+						ctx.drawImage(img, 0, 0, width, height);
+
+						const dataURL = canvas.toDataURL('image/png');
+						resolve(dataURL);
+					};
+
+					img.onerror = () =>
+						reject(new Error('画像の読み込みに失敗しました'));
+					img.src = url;
+				});
+			}
 
 			async function ImageToNekoImage(URL) {
 				const img = new Image();
@@ -144,10 +195,12 @@
 				return `${VER}.${canvas.width}.${canvas.height},${Link.join('')},${Data}`;
 			}
 
+			// ── メイン処理 ──
 			const fileInput = document.getElementById('fileInput');
 			const preview = document.getElementById('preview');
 			const convertBtn = document.getElementById('convertBtn');
 			const copyBtn = document.getElementById('copyBtn');
+			const resizeChk = document.getElementById('resizeChk');
 			const resultArea = document.getElementById('result');
 			const status = document.getElementById('status');
 
@@ -191,7 +244,13 @@
 				status.textContent = '変換中...';
 
 				try {
-					const nekoStr = await ImageToNekoImage(currentBlobURL);
+					let url = currentBlobURL;
+					if (resizeChk.checked) {
+						status.textContent = 'リサイズ中...';
+						url = await resizeImage(url);
+						await (status.textContent = '変換中...');
+					}
+					const nekoStr = await ImageToNekoImage(url);
 					if (!nekoStr) {
 						throw new Error('変換結果が空です');
 					}
