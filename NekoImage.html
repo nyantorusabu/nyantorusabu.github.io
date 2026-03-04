@@ -109,7 +109,11 @@
 		</div>
 
 		<script>
-			const VER = 1;
+			const VER = {
+				Image: 1,
+				Video: 1,
+			};
+			let ImageCode = '';
 
 			function getPixelHexArray(imageData) {
 				const data = imageData.data;
@@ -199,7 +203,7 @@
 					ctx.getImageData(0, 0, canvas.width, canvas.height),
 				);
 				const { Link, Data } = compressPixels(Pixels);
-				return `${VER}.${canvas.width}.${canvas.height},${Link.join('')},${Data}`;
+				return `${VER.Image}.${canvas.width}.${canvas.height},${Link.join('')},${Data}`;
 			}
 
 			async function VideoToNekoVideo(
@@ -261,26 +265,28 @@
 					frameDatas.push(Data);
 
 					// 進捗
-					const percent = Math.round(
-						(currentFrame / totalFrames) * 100,
-					);
-					const elapsed = Date.now() - startTime;
-					const remainingSec = Math.round(
-						((elapsed / currentFrame) *
-							(totalFrames - currentFrame)) /
-							1000,
-					);
-
-					if (onProgress)
-						onProgress(
-							currentFrame,
-							totalFrames,
-							percent,
-							remainingSec,
+					if (document.visibilityState === 'visible') {
+						const percent = Math.round(
+							(currentFrame / totalFrames) * 100,
 						);
+						const elapsed = Date.now() - startTime;
+						const remainingSec = Math.round(
+							((elapsed / currentFrame) *
+								(totalFrames - currentFrame)) /
+								1000,
+						);
+
+						if (onProgress)
+							onProgress(
+								currentFrame,
+								totalFrames,
+								percent,
+								remainingSec,
+							);
+					}
 				}
 
-				return `${VER}.${width}.${height}.${fps},${Link.join('')},${frameDatas.join(';')};`;
+				return `${VER.Video}.${width}.${height}.${fps},${Link.join('')},${frameDatas.join(';')};`;
 			}
 
 			const fileInput = document.getElementById('fileInput');
@@ -365,7 +371,13 @@
 						nekoStr = await ImageToNekoImage(url);
 					}
 
-					resultArea.value = nekoStr;
+					if (nekoStr.length > 1000000) {
+						resultArea.value =
+							'サイズが大きすぎるため、プレビューを表示しません。';
+					} else {
+						resultArea.value = nekoStr;
+					}
+					ImageCode = nekoStr;
 					copyBtn.disabled = false;
 					status.textContent = `変換完了（${nekoStr.length.toLocaleString()}文字）`;
 				} catch (err) {
@@ -378,7 +390,7 @@
 			});
 
 			copyBtn.addEventListener('click', async () => {
-				const text = resultArea.value.trim();
+				const text = ImageCode.trim();
 				if (!text) return;
 				try {
 					await navigator.clipboard.writeText(text);
