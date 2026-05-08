@@ -63,6 +63,29 @@
 				width: 100%;
 				height: 12px;
 			}
+			.disabled-group {
+				opacity: 0.5;
+				pointer-events: none;
+			}
+			.resize-inputs {
+				display: inline-flex;
+				align-items: center;
+				gap: 5px;
+				margin-left: 10px;
+				padding-left: 10px;
+				border-left: 2px solid #ddd;
+			}
+			.resize-inputs input[type='number'] {
+				width: 70px;
+				padding: 4px;
+				margin: 0;
+			}
+			body.processing {
+				cursor: wait;
+			}
+			body.processing button {
+				cursor: wait;
+			}
 		</style>
 	</head>
 	<body>
@@ -81,18 +104,25 @@
 		</div>
 
 		<div class="options">
-			<input id="resizeChk" type="checkbox" checked />
-			<label for="resizeChk">自動で480x360以下にリサイズする</label>
+			<div>
+				<input id="resizeChk" type="checkbox" checked />
+				<label for="resizeChk">リサイズ</label>
+				
+				<span id="resizeSettings" class="resize-inputs">
+					<input id="resizeW" type="number" min="1" value="480" /> x
+					<input id="resizeH" type="number" min="1" value="360" />
+					<label style="margin-left: 8px;">
+						<input id="limitChk" type="checkbox" checked />
+						指定サイズより大きい場合のみリサイズ
+					</label>
+				</span>
+			</div>
+			
 			<div id="fpsOption">
-				<label
-					>FPS
-					<input
-						id="fpsInput"
-						type="number"
-						min="1"
-						max="60"
-						value="30"
-				/></label>
+				<label>
+					FPS
+					<input id="fpsInput" type="number" min="1" max="60" value="30" />
+				</label>
 			</div>
 		</div>
 
@@ -115,67 +145,83 @@
 			};
 			let ImageCode = '';
 
-			function getPixelHexArray(imageData) {
-				const data = imageData.data;
-				const length = data.length / 4;
-				const Pixels = new Array(length);
-				for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-					Pixels[j] =
-						data[i].toString(16).padStart(2, '0') +
-						data[i + 1].toString(16).padStart(2, '0') +
-						data[i + 2].toString(16).padStart(2, '0') +
-						data[i + 3].toString(16).padStart(2, '0');
+			function compressImageData(imageData, linkArray, colorMap) {
+				// Bufferを32bit整数の配列として読み込む（比較を高速化）
+				const data32 = new Uint32Array(
+					imageData.data.buffer, 
+					imageData.data.byteOffset, 
+					imageData.data.byteLength / 4
+				);
+				const data8 = imageData.data;
+				const length = data32.length;
+				
+				if (length === 0) return '';
+
+				// 大量の文字列結合( += )を避けるため配列に格納して最後に結合
+				const parts = [];
+				let lastColor32 = data32[0];
+				let runLength = 1;
+
+				// 新色をパレットに登録する内部関数
+				const addColor = (c32, idx8) => {
+					const hex = data8[idx8].toString(16).padStart(2, '0') +
+								data8[idx8 + 1].toString(16).padStart(2, '0') +
+								data8[idx8 + 2].toString(16).padStart(2, '0') +
+								data8[idx8 + 3].toString(16).padStart(2, '0');
+					const newIdx = linkArray.length;
+					linkArray.push(hex);
+					colorMap.set(c32, newIdx);
+				};
+
+				if (!colorMap.has(lastColor32)) {
+					addColor(lastColor32, 0);
 				}
-				return Pixels;
-			}
 
-			function compressPixels(Pixels, sharedLink = null) {
-				const Link = sharedLink || [];
-				const colorToIndex = new Map(Link.map((c, i) => [c, i]));
-
-				let Data = '';
-				if (Pixels.length === 0) return { Link, Data: '' };
-
-				let L = Pixels[0];
-				let LC = 1;
-				if (!colorToIndex.has(L)) {
-					colorToIndex.set(L, Link.length);
-					Link.push(L);
-				}
-
-				for (let i = 1; i < Pixels.length; i++) {
-					const now = Pixels[i];
-					if (now === L) {
-						LC++;
+				for (let i = 1; i < length; i++) {
+					const currentColor32 = data32[i];
+					if (currentColor32 === lastColor32) {
+						runLength++;
 					} else {
-						Data += `${colorToIndex.get(L) + 1}.${LC}.`;
-						L = now;
-						LC = 1;
-						if (!colorToIndex.has(L)) {
-							colorToIndex.set(L, Link.length);
-							Link.push(L);
+						parts.push(`${colorMap.get(lastColor32) + 1}.${runLength}.`);
+						lastColor32 = currentColor32;
+						runLength = 1;
+						if (!colorMap.has(lastColor32)) {
+							// 新しい色は元の8bit配列のインデックスからRGBAを取得
+							addColor(lastColor32, i * 4);
 						}
 					}
 				}
-				Data += `${colorToIndex.get(L) + 1}.${LC}.`;
-				return { Link, Data };
+				parts.push(`${colorMap.get(lastColor32) + 1}.${runLength}.`);
+				
+				return parts.join('');
 			}
 
-			async function resizeImage(url, maxWidth = 480, maxHeight = 360) {
+			async function resizeImage(url, targetW, targetH, limitOnly) {
 				return new Promise((resolve, reject) => {
 					const img = new Image();
 					img.crossOrigin = 'anonymous';
 					img.onload = () => {
 						let { naturalWidth: w, naturalHeight: h } = img;
-						if (w > maxWidth || h > maxHeight) {
-							const scale = Math.min(maxWidth / w, maxHeight / h);
-							w = Math.round(w * scale);
-							h = Math.round(h * scale);
+						
+						if (limitOnly) {
+							if (w > targetW || h > targetH) {
+								const scale = Math.min(targetW / w, targetH / h);
+								w = Math.round(w * scale);
+								h = Math.round(h * scale);
+							}
+						} else {
+							w = targetW;
+							h = targetH;
 						}
+
 						const canvas = document.createElement('canvas');
 						canvas.width = w;
 						canvas.height = h;
-						canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+						// 画質を保つためのスムージング設定
+						const ctx = canvas.getContext('2d');
+						ctx.imageSmoothingEnabled = true;
+						ctx.imageSmoothingQuality = 'high';
+						ctx.drawImage(img, 0, 0, w, h);
 						resolve(canvas.toDataURL('image/png'));
 					};
 					img.onerror = () => reject(new Error('画像読み込み失敗'));
@@ -188,29 +234,32 @@
 				img.crossOrigin = 'anonymous';
 				await new Promise((r, e) => {
 					img.onload = r;
-					img.onerror = () =>
-						e(new Error(`画像読み込み失敗: ${URL}`));
+					img.onerror = () => e(new Error(`画像読み込み失敗: ${URL}`));
 					img.src = URL;
 				});
 
 				const canvas = document.createElement('canvas');
 				canvas.width = img.width;
 				canvas.height = img.height;
-				const ctx = canvas.getContext('2d');
+				// willReadFrequently: true を指定して getImageData を高速化
+				const ctx = canvas.getContext('2d', { willReadFrequently: true });
 				ctx.drawImage(img, 0, 0);
 
-				const Pixels = getPixelHexArray(
-					ctx.getImageData(0, 0, canvas.width, canvas.height),
-				);
-				const { Link, Data } = compressPixels(Pixels);
+				const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+				const Link = [];
+				const colorMap = new Map();
+				const Data = compressImageData(imageData, Link, colorMap);
+
 				return `${VER.Image}.${canvas.width}.${canvas.height},${Link.join('')},${Data}`;
 			}
 
 			async function VideoToNekoVideo(
 				videoURL,
 				fps,
-				maxWidth = 480,
-				maxHeight = 360,
+				doResize,
+				targetW,
+				targetH,
+				limitOnly,
 				onProgress,
 			) {
 				const video = document.createElement('video');
@@ -220,70 +269,85 @@
 				video.playsInline = true;
 
 				await new Promise((resolve, reject) => {
-					video.onloadedmetadata = resolve;
+					video.onloadedmetadata = () => {
+						if (isNaN(video.duration) || video.duration === Infinity) {
+							// メタデータロード直後にdurationが不正な場合の対策
+							video.currentTime = 1e101; 
+							video.ontimeupdate = () => {
+								video.ontimeupdate = null;
+								video.currentTime = 0;
+								resolve();
+							};
+						} else {
+							resolve();
+						}
+					};
 					video.onerror = () => reject(new Error('動画読み込み失敗'));
 				});
 
-				let width = video.videoWidth,
-					height = video.videoHeight;
-				if (width > maxWidth || height > maxHeight) {
-					const scale = Math.min(
-						maxWidth / width,
-						maxHeight / height,
-					);
-					width = Math.round(width * scale);
-					height = Math.round(height * scale);
+				let width = video.videoWidth;
+				let height = video.videoHeight;
+				
+				if (doResize) {
+					if (limitOnly) {
+						if (width > targetW || height > targetH) {
+							const scale = Math.min(targetW / width, targetH / height);
+							width = Math.round(width * scale);
+							height = Math.round(height * scale);
+						}
+					} else {
+						width = targetW;
+						height = targetH;
+					}
 				}
 
 				const canvas = document.createElement('canvas');
 				canvas.width = width;
 				canvas.height = height;
-				const ctx = canvas.getContext('2d');
+				// CPU上でのピクセル読み取りを最適化
+				const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
 				const Link = [];
+				const colorMap = new Map(); // 全フレームで共有することで再構築の負荷をゼロに
 				const frameDatas = [];
 				const frameInterval = 1 / fps;
 				const duration = video.duration;
-				const totalFrames = Math.ceil(duration * fps);
+				const totalFrames = Math.floor(duration * fps); // ceilだと動画範囲外をシークするバグがあったためfloorに変更
 
 				const startTime = Date.now();
 
-				for (let i = 0; i < totalFrames; i++) {
-					const currentFrame = i + 1;
-					const currentTime = Math.min(i * frameInterval, duration);
-					video.currentTime = currentTime;
+				try {
+					for (let i = 0; i < totalFrames; i++) {
+						const currentFrame = i + 1;
+						// 丸め誤差によるシーク不良を防ぐため僅かにオフセットを追加
+						const currentTime = Math.min(i * frameInterval + 0.0001, duration);
+						video.currentTime = currentTime;
 
-					await new Promise((resolve) => {
-						video.onseeked = resolve;
-					});
+						await new Promise((resolve) => {
+							video.onseeked = resolve;
+						});
 
-					ctx.drawImage(video, 0, 0, width, height);
-					const Pixels = getPixelHexArray(
-						ctx.getImageData(0, 0, width, height),
-					);
-					const { Data } = compressPixels(Pixels, Link);
-					frameDatas.push(Data);
+						ctx.drawImage(video, 0, 0, width, height);
+						const imageData = ctx.getImageData(0, 0, width, height);
+						
+						const Data = compressImageData(imageData, Link, colorMap);
+						frameDatas.push(Data);
 
-					// 進捗
-					if (document.visibilityState === 'visible') {
-						const percent = Math.round(
-							(currentFrame / totalFrames) * 100,
-						);
+						// 進捗の更新（バックグラウンドタブでも計算を止めない）
+						const percent = Math.round((currentFrame / totalFrames) * 100);
 						const elapsed = Date.now() - startTime;
 						const remainingSec = Math.round(
-							((elapsed / currentFrame) *
-								(totalFrames - currentFrame)) /
-								1000,
+							((elapsed / currentFrame) * (totalFrames - currentFrame)) / 1000
 						);
 
-						if (onProgress)
-							onProgress(
-								currentFrame,
-								totalFrames,
-								percent,
-								remainingSec,
-							);
+						if (onProgress) {
+							onProgress(currentFrame, totalFrames, percent, remainingSec);
+						}
 					}
+				} finally {
+					// メモリリーク防止のためビデオソースをクリア
+					video.removeAttribute('src');
+					video.load();
 				}
 
 				return `${VER.Video}.${width}.${height}.${fps},${Link.join('')},${frameDatas.join(';')};`;
@@ -294,18 +358,31 @@
 			const videoPreview = document.getElementById('videoPreview');
 			const convertBtn = document.getElementById('convertBtn');
 			const copyBtn = document.getElementById('copyBtn');
+			
 			const resizeChk = document.getElementById('resizeChk');
+			const resizeSettings = document.getElementById('resizeSettings');
+			const resizeW = document.getElementById('resizeW');
+			const resizeH = document.getElementById('resizeH');
+			const limitChk = document.getElementById('limitChk');
+			
 			const fpsOption = document.getElementById('fpsOption');
 			const fpsInput = document.getElementById('fpsInput');
 			const resultArea = document.getElementById('result');
 			const status = document.getElementById('status');
-			const progressContainer =
-				document.getElementById('progressContainer');
+			const progressContainer = document.getElementById('progressContainer');
 			const progressBar = document.getElementById('progressBar');
 			const progressText = document.getElementById('progressText');
 
 			let currentBlobURL = null;
 			let isVideo = false;
+
+			resizeChk.addEventListener('change', () => {
+				if (resizeChk.checked) {
+					resizeSettings.classList.remove('disabled-group');
+				} else {
+					resizeSettings.classList.add('disabled-group');
+				}
+			});
 
 			fileInput.addEventListener('change', () => {
 				const file = fileInput.files[0];
@@ -328,6 +405,8 @@
 				if (isVideo) {
 					videoPreview.src = currentBlobURL;
 					videoPreview.onloadedmetadata = () => {
+						// 最初のフレームを表示させるために少しシーク
+						videoPreview.currentTime = 0.1;
 						status.textContent = `動画サイズ: ${videoPreview.videoWidth}x${videoPreview.videoHeight} / ${videoPreview.duration.toFixed(1)}秒`;
 						convertBtn.disabled = false;
 					};
@@ -348,32 +427,42 @@
 				resultArea.value = '';
 				progressContainer.style.display = isVideo ? 'block' : 'none';
 				progressBar.value = 0;
+				document.body.classList.add('processing');
 
 				status.textContent = '変換中...';
 
+				// UIの描画更新をブラウザに許容させるための微小な遅延
+				await new Promise(r => setTimeout(r, 50));
+
 				try {
 					let nekoStr;
+					const targetW = parseInt(resizeW.value) || 480;
+					const targetH = parseInt(resizeH.value) || 360;
+
 					if (isVideo) {
 						const fps = parseInt(fpsInput.value) || 30;
 						nekoStr = await VideoToNekoVideo(
 							currentBlobURL,
 							fps,
-							resizeChk.checked ? 480 : Infinity,
-							resizeChk.checked ? 360 : Infinity,
+							resizeChk.checked,
+							targetW,
+							targetH,
+							limitChk.checked,
 							(cur, tot, pct, rem) => {
 								progressBar.value = pct;
 								progressText.textContent = `${cur}/${tot} (${pct}%) 残り約${rem}秒`;
-							},
+							}
 						);
 					} else {
 						let url = currentBlobURL;
-						if (resizeChk.checked) url = await resizeImage(url);
+						if (resizeChk.checked) {
+							url = await resizeImage(url, targetW, targetH, limitChk.checked);
+						}
 						nekoStr = await ImageToNekoImage(url);
 					}
 
 					if (nekoStr.length > 1000000) {
-						resultArea.value =
-							'サイズが大きすぎるため、プレビューを表示しません。';
+						resultArea.value = 'サイズが大きすぎるため、プレビューを表示しません。';
 					} else {
 						resultArea.value = nekoStr;
 					}
@@ -386,6 +475,7 @@
 				} finally {
 					convertBtn.disabled = false;
 					progressContainer.style.display = 'none';
+					document.body.classList.remove('processing');
 				}
 			});
 
@@ -396,8 +486,7 @@
 					await navigator.clipboard.writeText(text);
 					status.textContent = 'クリップボードにコピーしました';
 				} catch {
-					status.textContent =
-						'コピーに失敗しました。手動で選択してコピーしてください';
+					status.textContent = 'コピーに失敗しました。手動で選択してコピーしてください';
 				}
 			});
 		</script>
